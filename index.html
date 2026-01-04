@@ -140,6 +140,21 @@ button:hover, .task-btn:hover, .theme-btn:hover, .settings-wall-btn:hover, .sett
 /* Toast */
 #toast{position:fixed;right:12px;bottom:64px;background:rgba(15,23,42,.98);padding:8px 10px;border-radius:8px;border:1px solid rgba(59,130,246,.8);z-index:1000;opacity:0;transform:translateY(8px);transition:opacity .12s,transform .12s}
 #toast.show{opacity:1;transform:translateY(0)}
+
+/* Notes app */
+.notes-app{display:flex;height:100%;font-size:13px}
+.notes-sidebar{width:200px;border-right:1px solid rgba(55,65,81,.9);padding:8px;display:flex;flex-direction:column}
+.notes-sidebar-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.notes-list{flex:1;overflow:auto}
+.notes-item{display:flex;justify-content:space-between;align-items:center;padding:6px;border-radius:6px;cursor:pointer}
+.notes-item:hover{background:rgba(31,41,55,.9)}
+.notes-item-active{background:rgba(37,99,235,.6)}
+.notes-item-title{flex:1;margin-right:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notes-item-delete{border:none;background:transparent;color:var(--text-sub);cursor:pointer;font-size:14px;line-height:1}
+.notes-item-delete:hover{color:#f97373}
+.notes-main{flex:1;padding:10px;display:flex;flex-direction:column;height:100%}
+.notes-title-input{width:100%;padding:6px;border-radius:6px;border:1px solid rgba(55,65,81,.9);background:rgba(15,23,42,.95);color:var(--text-main);margin-bottom:8px}
+.notes-body{flex:1;resize:none;padding:8px;border-radius:8px;border:1px solid rgba(55,65,81,.9);background:rgba(15,23,42,.95);color:var(--text-main);font-family:inherit;font-size:13px}
 </style>
 </head>
 <body>
@@ -867,10 +882,160 @@ function renderGlassPanel(panel){
    Notes, Calculator, This PC, Recycle, Terminal, Task Manager
    (register core apps with full implementations)
    ------------------------- */
+
+/* New Notes app (two-pane, list + editor) */
 registerApp("notes", {
   title: "Notes",
-  createContent(){ const d=document.createElement("div"); d.innerHTML=`<textarea style="width:100%;height:100%;padding:8px;border-radius:8px;border:1px solid rgba(55,65,81,.9);background:rgba(15,23,42,.95);color:var(--text-main)">${localStorage.getItem("lp-notes")||""}</textarea>`; const ta=d.querySelector("textarea"); ta.oninput=()=>localStorage.setItem("lp-notes", ta.value); return d; }
+  createContent(){
+    const root = document.createElement("div");
+    root.className = "notes-app";
+
+    const STORAGE_KEY = "lp-notes-list-v2";
+
+    function loadNotes(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(raw){
+          const arr = JSON.parse(raw);
+          if(Array.isArray(arr) && arr.length) return arr;
+        }
+      }catch(e){}
+      // fallback: migrate old single textarea if present
+      let oldBody = "";
+      try{
+        oldBody = localStorage.getItem("lp-notes") || "";
+      }catch(e){}
+      const initial = [{
+        id: "welcome-"+Date.now(),
+        title: "Welcome",
+        body: oldBody || "This is your first note."
+      }];
+      saveNotes(initial);
+      return initial;
+    }
+    function saveNotes(list){
+      try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }catch(e){}
+    }
+
+    let notes = loadNotes();
+    let currentId = notes.length ? notes[0].id : null;
+
+    root.innerHTML = `
+      <div class="notes-sidebar">
+        <div class="notes-sidebar-header">
+          <div style="font-size:13px;font-weight:600">All notes</div>
+          <button id="notesNewBtn" class="theme-btn" style="font-size:12px;padding:4px 8px;">New</button>
+        </div>
+        <div class="notes-list" id="notesList"></div>
+      </div>
+      <div class="notes-main">
+        <input id="notesTitle" class="notes-title-input" placeholder="Title">
+        <textarea id="notesBody" class="notes-body" placeholder="Start typing..."></textarea>
+      </div>
+    `;
+
+    const listEl = root.querySelector("#notesList");
+    const titleInput = root.querySelector("#notesTitle");
+    const bodyInput = root.querySelector("#notesBody");
+    const newBtn = root.querySelector("#notesNewBtn");
+
+    function renderList(){
+      listEl.innerHTML = "";
+      if(!notes.length){
+        listEl.innerHTML = `<div style="font-size:12px;color:var(--text-sub);padding:4px 2px;">No notes yet. Click "New".</div>`;
+        titleInput.value = "";
+        bodyInput.value = "";
+        currentId = null;
+        return;
+      }
+      notes.forEach(n=>{
+        const row = document.createElement("div");
+        row.className = "notes-item" + (n.id===currentId ? " notes-item-active" : "");
+        row.dataset.id = n.id;
+        row.innerHTML = `
+          <div class="notes-item-title">${escapeHtml(n.title || "Untitled")}</div>
+          <button class="notes-item-delete" title="Delete">🗑</button>
+        `;
+        row.addEventListener("click",(e)=>{
+          if(e.target.closest(".notes-item-delete")) return;
+          selectNote(n.id);
+        });
+        row.querySelector(".notes-item-delete").onclick = (e)=>{
+          e.stopPropagation();
+          deleteNote(n.id);
+        };
+        listEl.appendChild(row);
+      });
+    }
+
+    function selectNote(id){
+      const note = notes.find(n=>n.id===id);
+      if(!note) return;
+      currentId = id;
+      titleInput.value = note.title || "";
+      bodyInput.value = note.body || "";
+      renderList();
+    }
+
+    function createNote(){
+      const n = {
+        id: "note-"+Date.now(),
+        title: "New note",
+        body: ""
+      };
+      notes.unshift(n);
+      saveNotes(notes);
+      currentId = n.id;
+      renderList();
+      titleInput.focus();
+      titleInput.select();
+    }
+
+    function deleteNote(id){
+      const idx = notes.findIndex(n=>n.id===id);
+      if(idx===-1) return;
+      notes.splice(idx,1);
+      if(currentId===id){
+        currentId = notes[0]?.id || null;
+      }
+      saveNotes(notes);
+      renderList();
+      if(currentId){
+        const n = notes.find(n=>n.id===currentId);
+        titleInput.value = n?.title || "";
+        bodyInput.value = n?.body || "";
+      }else{
+        titleInput.value = "";
+        bodyInput.value = "";
+      }
+    }
+
+    function updateCurrentFromInputs(){
+      if(!currentId) return;
+      const n = notes.find(n=>n.id===currentId);
+      if(!n) return;
+      n.title = titleInput.value;
+      n.body = bodyInput.value;
+      saveNotes(notes);
+      renderList();
+    }
+
+    newBtn.onclick = ()=>createNote();
+    titleInput.addEventListener("input", updateCurrentFromInputs);
+    bodyInput.addEventListener("input", updateCurrentFromInputs);
+
+    // initial render
+    renderList();
+    if(currentId){
+      const n = notes.find(n=>n.id===currentId);
+      titleInput.value = n?.title || "";
+      bodyInput.value = n?.body || "";
+    }
+
+    return root;
+  }
 });
+
 registerApp("calculator", {
   title: "Calculator",
   createContent(){ const d=document.createElement("div"); d.innerHTML=`<div style="font-size:13px">Calculator (basic)</div>`; return d; }
@@ -890,6 +1055,45 @@ registerApp("terminal", {
 registerApp("taskmgr", {
   title: "Task Manager",
   createContent(){ const root=document.createElement("div"); root.innerHTML=`<div style="font-size:13px">Task Manager</div><div id="taskList" style="margin-top:8px"></div>`; renderTaskManagerContent(root); return root; }
+});
+
+/* Core LP Browser with Google CSE */
+registerApp("browser", {
+  title: "LP Browser",
+  createContent(){
+    const root = document.createElement("div");
+    root.style.display = "flex";
+    root.style.flexDirection = "column";
+    root.style.height = "100%";
+
+    const topBar = document.createElement("div");
+    topBar.style.padding = "6px 8px";
+    topBar.style.fontSize = "13px";
+    topBar.style.borderBottom = "1px solid rgba(55,65,81,.9)";
+    topBar.textContent = "LP Browser";
+
+    const content = document.createElement("div");
+    content.style.flex = "1";
+    content.style.overflow = "auto";
+    content.style.padding = "8px";
+
+    const searchContainer = document.createElement("div");
+    searchContainer.className = "gcse-search";
+    content.appendChild(searchContainer);
+
+    // Only inject the script once
+    if(!document.querySelector("script[data-lp-cse]")){
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = "https://cse.google.com/cse.js?cx=41f9b115ed19d47de";
+      script.setAttribute("data-lp-cse","1");
+      document.head.appendChild(script);
+    }
+
+    root.appendChild(topBar);
+    root.appendChild(content);
+    return root;
+  }
 });
 
 /* Recycle helpers */
@@ -1016,13 +1220,15 @@ function performInstall(id){
     }});
   }
   if(id==="notes" && !OS.state.apps["notes"]){
-    registerApp("notes",{ title:"Notes", createContent(){ const d=document.createElement("div"); d.innerHTML=`<textarea style="width:100%;height:100%;padding:8px;border-radius:8px;background:rgba(15,23,42,.95);color:var(--text-main)"></textarea>`; return d; }});
+    // core Notes already installed; this branch will normally not run
+    registerApp("notes",{ title:"Notes", createContent(){ const d=document.createElement("div"); d.innerHTML=`<div style="font-size:13px">Notes app is already available.</div>`; return d; }});
   }
   if(id==="calc" && !OS.state.apps["calc"]){
     registerApp("calc",{ title:"Calculator", createContent(){ const d=document.createElement("div"); d.innerHTML=`<div style="font-size:13px">Calculator</div>`; return d; }});
   }
   if(id==="browser" && !OS.state.apps["browser"]){
-    registerApp("browser",{ title:"LP Browser", createContent(){ const d=document.createElement("div"); d.innerHTML=`<div style="font-size:13px">LP Browser</div>`; return d; }});
+    // core Browser already installed; this branch will normally not run
+    registerApp("browser",{ title:"LP Browser", createContent(){ const d=document.createElement("div"); d.innerHTML=`<div style="font-size:13px">LP Browser is already available.</div>`; return d; }});
   }
 
   // after a short delay add to pinned apps so Start shows it
@@ -1227,6 +1433,12 @@ function showTaskbarAppContextMenu(tbBtn,x,y){
   };
 }
 
+/* minimize all helper used by Start options */
+function minimizeAllWindows(){
+  OS.state.windows.forEach(w=>{ w.style.display = "none"; });
+  renderTaskbar();
+}
+
 /* -------------------------
    Init desktop
    ------------------------- */
@@ -1261,7 +1473,6 @@ document.addEventListener("DOMContentLoaded", startBoot);
   const core = ["settings","store","thispc","terminal","notes","calculator","browser","recycle-bin","taskmgr"];
   core.forEach(id=>{ if(!OS.state.apps[id]){ /* If missing, user can install from Store; do not overwrite */ } });
 })();
-
 </script>
 </body>
 </html>
