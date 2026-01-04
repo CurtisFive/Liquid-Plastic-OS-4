@@ -16,7 +16,7 @@
   --radius:18px;
 }
 
-/* Basic reset */
+/* Reset */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
 body{
@@ -307,6 +307,23 @@ function simpleHash(s){
   let h=2166136261;
   for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h += (h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24); }
   return (h>>>0).toString(16);
+}
+
+/* -------------------------
+   Glass setter (persisted)
+   ------------------------- */
+function setGlassLevel(percent){
+  const p = Math.max(0, Math.min(100, Number(percent) || 0));
+  const t = Math.max(0.05, p/100);
+  document.documentElement.style.setProperty("--glass-opacity", String(t));
+  document.documentElement.style.setProperty("--glass-border-alpha", String(0.3 + 0.4*t));
+  document.documentElement.style.setProperty("--icon-glass-opacity", String(0.5 + 0.5*t));
+  OS.config.glassLevel = t;
+  try{ localStorage.setItem("lp-glass", String(t)); }catch(e){}
+  // update panels
+  renderTaskbar();
+  const panels = [$("#startMenu .inner"), $("#notifPanel .inner"), $("#ctxMenu .inner")];
+  panels.forEach(pn=>{ if(pn) pn.style.background = `rgba(15,23,42,${t})`; });
 }
 
 /* -------------------------
@@ -827,15 +844,7 @@ function renderGlassPanel(panel){
   `;
   const slider = panel.querySelector(".glass-slider");
   function applyGlass(level){
-    const t = Math.max(0.05, Math.min(1, level/100));
-    document.documentElement.style.setProperty("--glass-opacity", String(t));
-    document.documentElement.style.setProperty("--glass-border-alpha", String(0.3 + 0.4*t));
-    document.documentElement.style.setProperty("--icon-glass-opacity", String(0.5 + 0.5*t));
-    OS.config.glassLevel = t;
-    try{ localStorage.setItem("lp-glass", String(t)); }catch(e){}
-    renderTaskbar();
-    const panels = [$("#startMenu .inner"), $("#notifPanel .inner"), $("#ctxMenu .inner")];
-    panels.forEach(p=>{ if(p) p.style.background = `rgba(15,23,42,${t})`; });
+    setGlassLevel(level);
   }
   slider.oninput = ()=>{ applyGlass(Number(slider.value)); updatePresetActive(Number(slider.value)); };
   function updatePresetActive(v){
@@ -856,7 +865,7 @@ function renderGlassPanel(panel){
 
 /* -------------------------
    Notes, Calculator, This PC, Recycle, Terminal, Task Manager
-   (register core apps with full content)
+   (register core apps with full implementations)
    ------------------------- */
 registerApp("notes", {
   title: "Notes",
@@ -1250,7 +1259,7 @@ document.addEventListener("DOMContentLoaded", startBoot);
    ------------------------- */
 (function ensureCore(){
   const core = ["settings","store","thispc","terminal","notes","calculator","browser","recycle-bin","taskmgr"];
-  core.forEach(id=>{ if(!OS.state.apps[id]){ /* no-op: apps registered above; if missing, user can reinstall from Store */ } });
+  core.forEach(id=>{ if(!OS.state.apps[id]){ /* If missing, user can install from Store; do not overwrite */ } });
 })();
 
 </script>
